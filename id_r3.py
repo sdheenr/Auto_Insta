@@ -58,6 +58,8 @@ ITER_THROTTLE_SEC = 0.75  # tiny delay per post to reduce GraphQL pressure
 MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".mov"}
 META_EXTS = {".txt", ".json", ".xz", ".xml", ".log"}
 
+DOWNLOAD_METADATA = True  # toggled via CLI
+
 BACKOFF_BASE_SEC = 120
 BACKOFF_CAP_SEC = 480
 MAX_RETRIES_PROFILE = 6
@@ -467,7 +469,7 @@ def make_loader(entry: Dict[str, Optional[str]]) -> instaloader.Instaloader:
         download_pictures=True,
         download_videos=True,
         download_video_thumbnails=False,
-        save_metadata=True,
+        save_metadata=DOWNLOAD_METADATA,
         post_metadata_txt_pattern=None,   # avoid .txt sidecars
         compress_json=False,              # save plain .json (no .json.xz)
         max_connection_attempts=3
@@ -536,8 +538,16 @@ def _parse_dt_utc(s: str) -> datetime:
     raise ValueError(f"Invalid date/time format: '{s}'. Use 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM'.")
 
 def parse_cli():
-    p = argparse.ArgumentParser(description="Unified Instagram downloader with timed session rotation + marker-based daily stop.")
-    p.add_argument("mode", choices=["daily", "init", "all"], help="daily = fast/stop-early; init = bulk history; all = daily + stories/highlights")
+    description = (
+        "Unified Instagram downloader with timed session rotation + marker-based "
+        "daily stop."
+    )
+    p = argparse.ArgumentParser(description=description)
+    p.add_argument(
+        "mode",
+        choices=["daily", "init", "all"],
+        help="daily = fast/stop-early; init = bulk history; all = daily + stories/highlights",
+    )
     p.add_argument("profiles", nargs="*", help="Profile usernames (space or comma-separated).")
     p.add_argument("-f", dest="file", help="File with one profile per line.")
     p.add_argument("--after", dest="after", help="Only posts strictly AFTER this (YYYY-MM-DD or 'YYYY-MM-DD HH:MM').")
@@ -546,7 +556,17 @@ def parse_cli():
     p.add_argument("--reels-only", action="store_true")
     p.add_argument("--stories-only", action="store_true")
     p.add_argument("--highlights-only", action="store_true")
-    p.add_argument("--rotate-interval", type=int, default=120, help="Seconds between automatic session rotations. Default 120s.")
+    p.add_argument(
+        "--media-only",
+        action="store_true",
+        help="Skip JSON/txt sidecars and keep only media downloads.",
+    )
+    p.add_argument(
+        "--rotate-interval",
+        type=int,
+        default=120,
+        help="Seconds between automatic session rotations. Default 120s.",
+    )
     return p.parse_args()
 
 def parse_profiles_from_cli(args) -> List[str]:
@@ -957,13 +977,17 @@ def process_profile(sman: "SessionManager", profile_name: str, mode: str, base_p
 CURRENT_MODE = "daily"  # set during main()
 
 def main():
-    global CURRENT_MODE, DATE_AFTER_UTC, DATE_BEFORE_UTC
+    global CURRENT_MODE, DATE_AFTER_UTC, DATE_BEFORE_UTC, DOWNLOAD_METADATA
 
     initial_cleanup()
     os.makedirs("downloads", exist_ok=True)
 
     args = parse_cli()
     CURRENT_MODE = args.mode
+
+    if args.media_only:
+        DOWNLOAD_METADATA = False
+        print("   🎯 Media-only mode: metadata downloads disabled.")
 
     if args.after:
         DATE_AFTER_UTC = _parse_dt_utc(args.after)
@@ -983,6 +1007,7 @@ def main():
     if DATE_BEFORE_UTC:
         _log_line(f"DATE_BEFORE_UTC={DATE_BEFORE_UTC.isoformat()}")
     _log_line(f"rotate_interval={args.rotate_interval}s")
+    _log_line(f"media_only={args.media_only}")
 
     total_feed = total_reels = total_stories = total_highlights = total_rescued = 0
 
